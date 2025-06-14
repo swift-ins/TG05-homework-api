@@ -1,23 +1,28 @@
 import asyncio
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
 import requests
 from dotenv import load_dotenv
 import os
+import ssl
 
 # Загрузка токена
 load_dotenv()
 TOKEN = os.getenv("TOKEN")
-
-
 THE_DOG_API_KEY = os.getenv('THE_DOG_API_KEY')
 
-
-
+# Конфигурация вебхука
+WEBHOOK_PATH = "/webhook"
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Например, https://your-app-name.onrender.com
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
+
+async def on_startup(bot: Bot) -> None:
+    await bot.set_webhook(f"{WEBHOOK_URL}{WEBHOOK_PATH}")
 
 def get_dog_breeds():
     url = "https://api.thedogapi.com/v1/breeds"
@@ -54,6 +59,49 @@ def get_breeds_by_letter(letter: str):
     breeds = get_dog_breeds()
     return [breed['name'] for breed in breeds if breed['name'].upper().startswith(letter.upper())]
 
+def get_breeds_by_max_weight(max_weight):
+    breeds = get_dog_breeds()
+    result = []
+    for breed in breeds:
+        try:
+            weight_str = breed['weight']['metric']
+            if '-' in weight_str:
+                min_weight, max_weight_range = map(float, weight_str.split('-'))
+                if min_weight <= max_weight:
+                    result.append(breed['name'])
+            else:
+                weight = float(weight_str)
+                if weight <= max_weight:
+                    result.append(breed['name'])
+        except (KeyError, ValueError):
+            continue
+    return result
+
+def get_breeds_by_min_weight(min_weight):
+    breeds = get_dog_breeds()
+    result = []
+    for breed in breeds:
+        try:
+            weight_str = breed['weight']['metric']
+            if '-' in weight_str:
+                min_w, max_w = map(float, weight_str.split('-'))
+                if max_w >= min_weight:
+                    result.append({
+                        'name': breed['name'],
+                        'weight': f"{min_w}-{max_w} кг"
+                    })
+            else:
+                weight = float(weight_str)
+                if weight >= min_weight:
+                    result.append({
+                        'name': breed['name'],
+                        'weight': f"{weight} кг"
+                    })
+        except (KeyError, ValueError):
+            continue
+    return result
+
+# Обработчики команд (остаются без изменений)
 @dp.message(CommandStart())
 async def start_command(message: Message):
     await message.answer(
@@ -77,35 +125,13 @@ async def random_dog(message: Message):
         caption="Вот случайный песик для тебя! 🐕",
         reply_markup=ReplyKeyboardRemove()
     )
-def get_breeds_by_max_weight(max_weight):
-    breeds = get_dog_breeds()
-    result = []
-    for breed in breeds:
-        try:
-            # Пытаемся получить вес в метрической системе (кг)
-            weight_str = breed['weight']['metric']
-            # Обрабатываем диапазон весов (например, "2 - 4")
-            if '-' in weight_str:
-                min_weight, max_weight_range = map(float, weight_str.split('-'))
-                if min_weight <= max_weight:
-                    result.append(breed['name'])
-            else:
-                # Если указано одно значение веса
-                weight = float(weight_str)
-                if weight <= max_weight:
-                    result.append(breed['name'])
-        except (KeyError, ValueError):
-            continue
-    return result
 
-# Добавляем новую команду для поиска по весу
 @dp.message(Command("light_dogs"))
 async def light_dogs_command(message: Message):
-    max_weight = 2  # Максимальный вес в кг
+    max_weight = 2
     light_breeds = get_breeds_by_max_weight(max_weight)
     
     if light_breeds:
-        # Создаем клавиатуру с породами
         keyboard_buttons = []
         for i in range(0, len(light_breeds), 3):
             row = light_breeds[i:i+3]
@@ -128,47 +154,18 @@ async def light_dogs_command(message: Message):
             f"Не найдено пород собак весом до {max_weight} кг",
             reply_markup=ReplyKeyboardRemove()
         )
-def get_breeds_by_min_weight(min_weight):
-    breeds = get_dog_breeds()
-    result = []
-    for breed in breeds:
-        try:
-            # Получаем вес в метрической системе (кг)
-            weight_str = breed['weight']['metric']
-            # Обрабатываем диапазон весов (например, "70 - 90")
-            if '-' in weight_str:
-                min_w, max_w = map(float, weight_str.split('-'))
-                if max_w >= min_weight:
-                    result.append({
-                        'name': breed['name'],
-                        'weight': f"{min_w}-{max_w} кг"
-                    })
-            else:
-                # Если указано одно значение веса
-                weight = float(weight_str)
-                if weight >= min_weight:
-                    result.append({
-                        'name': breed['name'],
-                        'weight': f"{weight} кг"
-                    })
-        except (KeyError, ValueError):
-            continue
-    return result
 
-# Добавляем команду для поиска тяжелых собак
 @dp.message(Command("heavy_dogs"))
 async def heavy_dogs_command(message: Message):
-    min_weight = 80  # Минимальный вес в кг
+    min_weight = 80
     heavy_breeds = get_breeds_by_min_weight(min_weight)
     
     if heavy_breeds:
-        # Формируем список с информацией о весе
         breeds_list = "\n".join(
             f"🐕‍🦺 {breed['name']} ({breed['weight']})" 
             for breed in heavy_breeds
         )
         
-        # Создаем клавиатуру для выбора породы
         keyboard_buttons = []
         for i in range(0, len(heavy_breeds), 2):
             row = heavy_breeds[i:i+2]
@@ -191,7 +188,6 @@ async def heavy_dogs_command(message: Message):
             f"Не найдено пород собак весом более {min_weight} кг",
             reply_markup=ReplyKeyboardRemove()
         )
-
 
 @dp.message(Command("by_letter"))
 async def by_letter_command(message: Message):
@@ -285,7 +281,35 @@ async def send_dog_info(message: Message):
         )
 
 async def main():
-    await dp.start_polling(bot)
+    # Настройка вебхука
+    await bot.set_webhook(
+        url=f"{WEBHOOK_URL}{WEBHOOK_PATH}",
+        # certificate=ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)  # Раскомментируйте если используете SSL
+    )
+    
+    # Создание aiohttp приложения
+    app = web.Application()
+    webhook_requests_handler = SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot,
+    )
+    
+    webhook_requests_handler.register(app, path=WEBHOOK_PATH)
+    setup_application(app, dp, bot=bot)
+    
+    # Запуск сервера
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    # Получаем порт из переменной окружения или используем 8000 по умолчанию
+    port = int(os.getenv("PORT", 8000))
+    site = web.TCPSite(runner, host="0.0.0.0", port=port)
+    
+    await site.start()
+    
+    # Бесконечный цикл для поддержания работы сервера
+    while True:
+        await asyncio.sleep(3600)  # Спим 1 час
 
 if __name__ == '__main__':
     asyncio.run(main())
