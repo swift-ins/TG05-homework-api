@@ -16,7 +16,8 @@ THE_DOG_API_KEY = os.getenv('THE_DOG_API_KEY')
 
 # Конфигурация вебхука
 WEBHOOK_PATH = "/webhook"
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Например, https://your-app-name.onrender.com
+#WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Например, https://your-app-name.onrender.com
+WEBHOOK_URL = 'https://tg05-homework-render.onrender.com'
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
