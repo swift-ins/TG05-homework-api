@@ -7,7 +7,7 @@ from aiohttp import web
 import requests
 from dotenv import load_dotenv
 import os
-import ssl
+
 
 # Загрузка токена
 load_dotenv()
